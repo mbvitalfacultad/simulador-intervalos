@@ -1,5 +1,0 @@
-streamlit
-altair
-numpy
-scipy
-pandas
