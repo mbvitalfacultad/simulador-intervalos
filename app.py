@@ -122,14 +122,12 @@ else:
     muestras, medias, li, ls, contiene, valor_real = st.session_state.cache[key]
     # Recalcular solo IC si cambia el nivel de confianza
     if tipo == "Media con varianza conocida":
-        sigma = st.sidebar.slider("Desvío estándar poblacional (σ)", 0.1, 50.0, 5.0, 0.1)
         se = sigma/np.sqrt(n)
         z = norm.ppf(1-alpha/2)
         li = medias - z*se
         ls = medias + z*se
         contiene = (li <= valor_real) & (ls >= valor_real)
     elif tipo == "Media con varianza desconocida":
-        sigma = st.sidebar.slider("Desvío estándar poblacional (σ)", 0.1, 50.0, 5.0, 0.1)
         s = muestras.std(axis=1, ddof=1)
         se = s/np.sqrt(n)
         tval = t.ppf(1-alpha/2, df=n-1)
@@ -164,6 +162,9 @@ df = pd.DataFrame({
 chart = plot_intervalos(df, valor_real, tipo)
 st.altair_chart(chart, use_container_width=True)
 
-# Tabla de primeros 20 conjuntos muestrales
+# Tabla de primeros 20 conjuntos muestrales con numeración desde 1
+primeras_20 = pd.DataFrame(muestras[:20])
+primeras_20.index = np.arange(1, primeras_20.shape[0]+1)  # filas numeradas desde 1
+primeras_20.columns = np.arange(1, primeras_20.shape[1]+1)  # columnas numeradas desde 1
 st.subheader("Primeros 20 conjuntos muestrales")
-st.dataframe(pd.DataFrame(muestras[:20]).T)
+st.dataframe(primeras_20)
