@@ -1,163 +1,113 @@
 import streamlit as st
 import numpy as np
 import pandas as pd
-import scipy.stats as stt
-import altair as alt
+import matplotlib.pyplot as plt
+from scipy.stats import norm, t, chi2
 
-# =========================
-# Función para simular intervalos
-# =========================
-def simular_intervalos(tipo, n, sims, alpha, mu, sigma, p, rng):
+st.set_page_config(layout="wide")
+
+# --- Función para simular intervalos ---
+def simular_intervalos(tipo, mu, sigma, n, nivel_confianza, num_simulaciones, p=None):
     resultados = []
-    for i in range(sims):
-        if tipo == "Media con varianza conocida":
-            muestra = rng.normal(mu, sigma, n)
-            media_muestral = np.mean(muestra)
-            z = stt.norm.ppf(1 - alpha/2)
-            li = media_muestral - z * sigma/np.sqrt(n)
-            ls = media_muestral + z * sigma/np.sqrt(n)
-            valor_real = mu
-            estimador = media_muestral
+    alpha = 1 - nivel_confianza
 
-        elif tipo == "Media con varianza desconocida":
-            muestra = rng.normal(mu, sigma, n)
+    for _ in range(num_simulaciones):
+        if tipo in ["media_varianza_conocida", "media_varianza_desconocida"]:
+            muestra = np.random.normal(mu, sigma, n)
             media_muestral = np.mean(muestra)
-            s = np.std(muestra, ddof=1)
-            t = stt.t.ppf(1 - alpha/2, df=n-1)
-            li = media_muestral - t * s/np.sqrt(n)
-            ls = media_muestral + t * s/np.sqrt(n)
-            valor_real = mu
-            estimador = media_muestral
 
-        elif tipo == "Varianza":
-            muestra = rng.normal(mu, sigma, n)
+            if tipo == "media_varianza_conocida":
+                z = norm.ppf(1 - alpha/2)
+                error = z * sigma / np.sqrt(n)
+            else:
+                s = np.std(muestra, ddof=1)
+                t_val = t.ppf(1 - alpha/2, df=n-1)
+                error = t_val * s / np.sqrt(n)
+
+            li = media_muestral - error
+            ls = media_muestral + error
+            contiene = (li <= mu <= ls)
+            resultados.append((li, ls, media_muestral, contiene))
+
+        elif tipo == "varianza":
+            muestra = np.random.normal(mu, sigma, n)
             s2 = np.var(muestra, ddof=1)
-            chi2_inf = stt.chi2.ppf(1 - alpha/2, df=n-1)
-            chi2_sup = stt.chi2.ppf(alpha/2, df=n-1)
+            chi2_inf = chi2.ppf(1 - alpha/2, df=n-1)
+            chi2_sup = chi2.ppf(alpha/2, df=n-1)
             li = (n-1)*s2/chi2_inf
             ls = (n-1)*s2/chi2_sup
-            valor_real = sigma**2
-            estimador = s2
+            contiene = (li <= sigma**2 <= ls)
+            resultados.append((li, ls, s2, contiene))
 
-        elif tipo == "Proporción":
-            muestra = rng.binomial(1, p, n)
+        elif tipo == "proporcion":
+            muestra = np.random.binomial(1, p, n)
             phat = np.mean(muestra)
-            z = stt.norm.ppf(1 - alpha/2)
-            li = phat - z*np.sqrt(phat*(1-phat)/n)
-            ls = phat + z*np.sqrt(phat*(1-phat)/n)
-            li = max(0, li)
-            ls = min(1, ls)
-            valor_real = p
-            estimador = phat
+            z = norm.ppf(1 - alpha/2)
+            error = z * np.sqrt(phat*(1-phat)/n)
+            li = phat - error
+            ls = phat + error
+            contiene = (li <= p <= ls)
+            resultados.append((li, ls, phat, contiene))
 
-        resultados.append([i, li, ls, estimador, valor_real])
+    return resultados
 
-    df = pd.DataFrame(resultados, columns=["Sim", "LI", "LS", "Estadístico", "Valor_real"])
-    df["Cubre"] = (df["LI"] <= df["Valor_real"]) & (df["LS"] >= df["Valor_real"])
-    return df
+# --- Controles de usuario ---
+st.sidebar.header("Parámetros")
 
-# =========================
-# Función para graficar
-# =========================
-def plot_intervalos(df, valor_real, tipo, xmin, xmax):
-    base = alt.Chart(df).encode(y=alt.Y("Sim:O", axis=None))
-
-    intervalos = base.mark_rule(size=2).encode(
-        x="LI:Q",
-        x2="LS:Q",
-        color=alt.condition("datum.Cubre", alt.value("steelblue"), alt.value("red"))
-    )
-
-    puntos = base.mark_point(filled=True, size=30).encode(
-        x="Estadístico:Q",
-        color=alt.condition("datum.Cubre", alt.value("steelblue"), alt.value("red")),
-        tooltip=["LI", "LS", "Estadístico"]
-    )
-
-    linea_real = alt.Chart(pd.DataFrame({"valor": [valor_real]})).mark_rule(
-        color="green", strokeWidth=2
-    ).encode(
-        x="valor:Q",
-        tooltip=[alt.Tooltip("valor:Q", title=f"Valor poblacional ({tipo})")]
-    )
-
-    return (intervalos + puntos + linea_real).properties(
-        width=700, height=400, title=f"Intervalos de Confianza para {tipo}"
-    ).encode(
-        x=alt.X("LI", scale=alt.Scale(domain=[xmin, xmax]))
-    )
-
-# =========================
-# App principal
-# =========================
-st.set_page_config(page_title="Simulador de Intervalos de Confianza", layout="wide")
-st.title("Simulador de Intervalos de Confianza")
-
-# Sidebar - parámetros
-st.sidebar.header("Parámetros de la simulación")
 tipo = st.sidebar.selectbox(
-    "Tipo de intervalo",
-    ["Media con varianza conocida", "Media con varianza desconocida", "Varianza", "Proporción"]
+    "Selecciona el tipo de intervalo",
+    ["media_varianza_conocida", "media_varianza_desconocida", "varianza", "proporcion"]
 )
 
-n = st.sidebar.slider("Tamaño muestral (n)", 2, 500, 30, 1)
-sims = st.sidebar.slider("Número de simulaciones", 1, 200, 50, 1)
-conf = st.sidebar.slider("Nivel de confianza (%)", 80, 99, 95, 1)
-alpha = 1 - conf/100
+nivel_confianza = st.sidebar.slider("Nivel de confianza (%)", 80, 99, 95) / 100
+n = st.sidebar.number_input("Tamaño de muestra (n)", min_value=2, max_value=1000, value=30, step=1)
+num_simulaciones = st.sidebar.number_input("Número de simulaciones", min_value=1, max_value=200, value=20, step=1)
 
-# Inicializar estado
-if "mu" not in st.session_state:
-    st.session_state.mu = 0.0
-if "sigma" not in st.session_state:
-    st.session_state.sigma = 5.0
-if "p" not in st.session_state:
-    st.session_state.p = 0.5
+if tipo in ["media_varianza_conocida", "media_varianza_desconocida"]:
+    mu = st.sidebar.number_input("Media poblacional", value=0.0, step=0.1)
+    sigma = st.sidebar.number_input("Desvío estándar poblacional", min_value=0.1, value=1.0, step=0.1)
+    p = None
+elif tipo == "varianza":
+    mu = st.sidebar.number_input("Media poblacional", value=0.0, step=0.1)
+    sigma = st.sidebar.number_input("Desvío estándar poblacional", min_value=0.1, value=1.0, step=0.1)
+    p = None
+elif tipo == "proporcion":
+    p = st.sidebar.slider("Proporción poblacional", 0.01, 0.99, 0.5)
+    mu, sigma = None, None
 
-# Sliders + inputs sincronizados
-if tipo in ["Media con varianza conocida", "Media con varianza desconocida"]:
-    col1, col2 = st.sidebar.columns([3,1])
-    mu = col1.slider("Media poblacional (μ)", -100.0, 100.0, value=st.session_state.mu, step=0.1, key="mu_slider")
-    mu = col2.number_input(" ", value=mu, step=0.1, key="mu_input")
-    st.session_state.mu = mu
+# --- Simulación ---
+resultados = simular_intervalos(tipo, mu, sigma, n, nivel_confianza, num_simulaciones, p)
 
-    col3, col4 = st.sidebar.columns([3,1])
-    sigma = col3.slider("Desvío estándar poblacional (σ)", 0.1, 50.0, value=st.session_state.sigma, step=0.1, key="sigma_slider")
-    sigma = col4.number_input("  ", value=sigma, step=0.1, key="sigma_input")
-    st.session_state.sigma = sigma
+# --- Gráfico ---
+fig, ax = plt.subplots(figsize=(8, 6))
 
-elif tipo == "Varianza":
-    col1, col2 = st.sidebar.columns([3,1])
-    sigma = col1.slider("Desvío estándar poblacional (σ)", 0.1, 50.0, value=st.session_state.sigma, step=0.1, key="sigma_slider_var")
-    sigma = col2.number_input(" ", value=sigma, step=0.1, key="sigma_input_var")
-    st.session_state.sigma = sigma
+for i, (li, ls, est, contiene) in enumerate(resultados):
+    color = "blue" if contiene else "red"
+    ax.plot([li, ls], [i, i], color=color, marker="|")
+    ax.plot(est, i, "o", color="black")
 
-elif tipo == "Proporción":
-    col1, col2 = st.sidebar.columns([3,1])
-    p = col1.slider("Proporción poblacional (p)", 0.01, 0.99, value=st.session_state.p, step=0.01, key="p_slider")
-    p = col2.number_input("  ", value=p, step=0.01, key="p_input")
-    st.session_state.p = p
+# Línea verde del valor poblacional
+if tipo in ["media_varianza_conocida", "media_varianza_desconocida"]:
+    ax.axvline(mu, color="green", linestyle="--")
+    ax.set_title("Intervalos de confianza para la media")
+elif tipo == "varianza":
+    ax.axvline(sigma**2, color="green", linestyle="--")
+    ax.set_title("Intervalos de confianza para la varianza")
+elif tipo == "proporcion":
+    ax.axvline(p, color="green", linestyle="--")
+    ax.set_title("Intervalos de confianza para la proporción")
 
-# RNG
-rng = np.random.default_rng(1234)
+ax.set_xlabel("Valor")
+ax.set_ylabel("Simulación")
+st.pyplot(fig)
 
-# Simulación
-df = simular_intervalos(tipo, n, sims, alpha, st.session_state.mu, st.session_state.sigma, st.session_state.p, rng)
-valor_real = df["Valor_real"].iloc[0]
+# --- Descargar CSV ---
+df_resultados = pd.DataFrame(resultados, columns=["LI", "LS", "Estimador", "Contiene"])
+csv = df_resultados.to_csv(index=False).encode("utf-8")
 
-# Ajuste de dominio (siempre incluye el valor poblacional)
-xmin = min(df["LI"].min(), df["Estadístico"].min(), valor_real)
-xmax = max(df["LS"].max(), df["Estadístico"].max(), valor_real)
-span = xmax - xmin if xmax > 0 else 1
-pad = span * 0.1
-xmin_pad = min(xmin, valor_real) - pad
-xmax_pad = max(xmax, valor_real) + pad
-
-# Contenedor fijo arriba para el gráfico
-chart_container = st.empty()
-chart = plot_intervalos(df, valor_real, tipo, xmin_pad, xmax_pad)
-chart_container.altair_chart(chart, use_container_width=True)
-
-# Texto con porcentaje de cobertura
-cubre_pct = df["Cubre"].mean() * 100
-st.markdown(f"**Cobertura observada:** {cubre_pct:.1f}% de los intervalos contienen el valor real.")
-
+st.download_button(
+    label="📥 Descargar simulaciones en CSV",
+    data=csv,
+    file_name="simulaciones.csv",
+    mime="text/csv",
+)
