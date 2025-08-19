@@ -93,8 +93,17 @@ if "cache" not in st.session_state:
     st.session_state.cache = {}
 
 key = f"{tipo}-{n}-{sims}"
-
 rng = np.random.default_rng(1234)
+
+# Función para obtener valores poblacionales de manera segura
+def get_param(tipo):
+    if tipo in ["Media con varianza conocida", "Media con varianza desconocida"]:
+        return st.session_state.get("mu", 0.0)
+    elif tipo == "Varianza":
+        sigma = st.session_state.get("sigma", 1.0)
+        return sigma**2
+    elif tipo == "Proporción":
+        return st.session_state.get("p", 0.5)
 
 if key not in st.session_state.cache:
     # Generar datos y guardar parámetros
@@ -167,12 +176,7 @@ df = pd.DataFrame({
 })
 
 # Determinar valor poblacional para la línea
-if tipo in ["Media con varianza conocida", "Media con varianza desconocida"]:
-    valor_parametro = st.session_state.mu
-elif tipo == "Varianza":
-    valor_parametro = st.session_state.sigma**2
-elif tipo == "Proporción":
-    valor_parametro = st.session_state.p
+valor_parametro = get_param(tipo)
 
 # Gráfico
 chart = plot_intervalos(df, valor_parametro, tipo)
