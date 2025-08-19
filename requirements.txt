@@ -1,8 +1,5 @@
-Requisitos
-•	Python 3.9 o superior
-•	Librerías:
-o	streamlit
-o	numpy
-o	pandas
-o	matplotlib
-o	scipy
+streamlit
+numpy
+pandas
+altair
+scipy
