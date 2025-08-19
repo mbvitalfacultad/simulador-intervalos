@@ -1,74 +1,3 @@
-import streamlit as st
-import numpy as np
-import pandas as pd
-import altair as alt
-from scipy.stats import norm, t, chi2
-
-# =========================
-# Funciones auxiliares
-# =========================
-
-def sim_media_sigma_conocida(mu, sigma, n, sims, alpha, rng):
-    muestras = rng.normal(mu, sigma, (sims, n))
-    medias = muestras.mean(axis=1)
-    se = sigma / np.sqrt(n)
-    z = norm.ppf(1 - alpha/2)
-    li, ls = medias - z*se, medias + z*se
-    contiene = (li <= mu) & (ls >= mu)
-    return muestras, medias, li, ls, contiene
-
-def sim_media_sigma_desconocida(mu, sigma, n, sims, alpha, rng):
-    muestras = rng.normal(mu, sigma, (sims, n))
-    medias = muestras.mean(axis=1)
-    s = muestras.std(axis=1, ddof=1)
-    se = s / np.sqrt(n)
-    tval = t.ppf(1 - alpha/2, df=n-1)
-    li, ls = medias - tval*se, medias + tval*se
-    contiene = (li <= mu) & (ls >= mu)
-    return muestras, medias, li, ls, contiene
-
-def sim_varianza(sigma, n, sims, alpha, rng):
-    muestras = rng.normal(0, sigma, (sims, n))
-    s2 = muestras.var(axis=1, ddof=1)
-    chi2_low = chi2.ppf(alpha/2, df=n-1)
-    chi2_high = chi2.ppf(1 - alpha/2, df=n-1)
-    li = (n-1)*s2/chi2_high
-    ls = (n-1)*s2/chi2_low
-    contiene = (li <= sigma**2) & (ls >= sigma**2)
-    return muestras, s2, li, ls, contiene
-
-def sim_proporcion(p, n, sims, alpha, rng):
-    muestras = rng.binomial(1, p, (sims, n))
-    phat = muestras.mean(axis=1)
-    se = np.sqrt(phat*(1-phat)/n)
-    z = norm.ppf(1 - alpha/2)
-    li, ls = phat - z*se, phat + z*se
-    contiene = (li <= p) & (ls >= p)
-    return muestras, phat, li, ls, contiene
-
-def plot_intervalos(df, valor_parametro, titulo):
-    base = alt.Chart(df).encode(
-        y=alt.Y("Simulación:O", sort="descending")
-    )
-
-    intervalos = base.mark_rule(size=2).encode(
-        x="LI",
-        x2="LS",
-        color=alt.condition("datum.Contiene", alt.value("steelblue"), alt.value("red"))
-    )
-
-    puntos = base.mark_point(filled=True, size=30).encode(
-        x="Estadístico",
-        color=alt.condition("datum.Contiene", alt.value("steelblue"), alt.value("red"))
-    )
-
-    linea = alt.Chart(pd.DataFrame({"valor":[valor_parametro]})).mark_rule(color="green", strokeDash=[4,4]).encode(
-        x="valor"
-    )
-
-    chart = (intervalos + puntos + linea).properties(width=700, height=400, title=titulo)
-    return chart
-
 # =========================
 # App
 # =========================
@@ -88,85 +17,44 @@ sims = st.sidebar.slider("Número de simulaciones", 1, 200, 50, 1)
 conf = st.sidebar.slider("Nivel de confianza (%)", 80, 99, 95, 1)
 alpha = 1 - conf/100
 
-# Persistencia de datos
-if "cache" not in st.session_state:
-    st.session_state.cache = {}
+# Persistencia de parámetros con sliders visibles siempre
+if "mu" not in st.session_state:
+    st.session_state.mu = 0.0
+if "sigma" not in st.session_state:
+    st.session_state.sigma = 5.0
+if "p" not in st.session_state:
+    st.session_state.p = 0.5
 
-key = f"{tipo}-{n}-{sims}"
+if tipo in ["Media con varianza conocida", "Media con varianza desconocida"]:
+    mu = st.sidebar.slider("Media poblacional (μ)", -100.0, 100.0, value=st.session_state.mu, step=0.1)
+    sigma = st.sidebar.slider("Desvío estándar poblacional (σ)", 0.1, 50.0, value=st.session_state.sigma, step=0.1)
+    st.session_state.mu = mu
+    st.session_state.sigma = sigma
+elif tipo == "Varianza":
+    sigma = st.sidebar.slider("Desvío estándar poblacional (σ)", 0.1, 50.0, value=st.session_state.sigma, step=0.1)
+    st.session_state.sigma = sigma
+elif tipo == "Proporción":
+    p = st.sidebar.slider("Proporción poblacional (p)", 0.01, 0.99, value=st.session_state.p, step=0.01)
+    st.session_state.p = p
+
+# RNG
 rng = np.random.default_rng(1234)
 
-# Función para obtener valores poblacionales de manera segura
-def get_param(tipo):
-    if tipo in ["Media con varianza conocida", "Media con varianza desconocida"]:
-        return st.session_state.get("mu", 0.0)
-    elif tipo == "Varianza":
-        sigma = st.session_state.get("sigma", 1.0)
-        return sigma**2
-    elif tipo == "Proporción":
-        return st.session_state.get("p", 0.5)
+# Simulaciones
+if tipo == "Media con varianza conocida":
+    muestras, medias, li, ls, contiene = sim_media_sigma_conocida(st.session_state.mu, st.session_state.sigma, n, sims, alpha, rng)
+    valor_real = st.session_state.mu
+elif tipo == "Media con varianza desconocida":
+    muestras, medias, li, ls, contiene = sim_media_sigma_desconocida(st.session_state.mu, st.session_state.sigma, n, sims, alpha, rng)
+    valor_real = st.session_state.mu
+elif tipo == "Varianza":
+    muestras, medias, li, ls, contiene = sim_varianza(st.session_state.sigma, n, sims, alpha, rng)
+    valor_real = st.session_state.sigma**2
+elif tipo == "Proporción":
+    muestras, medias, li, ls, contiene = sim_proporcion(st.session_state.p, n, sims, alpha, rng)
+    valor_real = st.session_state.p
 
-if key not in st.session_state.cache:
-    # Generar datos y guardar parámetros
-    if tipo == "Media con varianza conocida":
-        mu = st.sidebar.slider("Media poblacional (μ)", -100.0, 100.0, 0.0, 0.1)
-        sigma = st.sidebar.slider("Desvío estándar poblacional (σ)", 0.1, 50.0, 5.0, 0.1)
-        muestras, medias, li, ls, contiene = sim_media_sigma_conocida(mu, sigma, n, sims, alpha, rng)
-        valor_real = mu
-        st.session_state.cache[key] = (muestras, medias, li, ls, contiene, valor_real, mu, sigma, None)
-        st.session_state.mu = mu
-        st.session_state.sigma = sigma
-    elif tipo == "Media con varianza desconocida":
-        mu = st.sidebar.slider("Media poblacional (μ)", -100.0, 100.0, 0.0, 0.1)
-        sigma = st.sidebar.slider("Desvío estándar poblacional (σ)", 0.1, 50.0, 5.0, 0.1)
-        muestras, medias, li, ls, contiene = sim_media_sigma_desconocida(mu, sigma, n, sims, alpha, rng)
-        valor_real = mu
-        st.session_state.cache[key] = (muestras, medias, li, ls, contiene, valor_real, mu, sigma, None)
-        st.session_state.mu = mu
-        st.session_state.sigma = sigma
-    elif tipo == "Varianza":
-        sigma = st.sidebar.slider("Desvío estándar poblacional (σ)", 0.1, 50.0, 5.0, 0.1)
-        muestras, medias, li, ls, contiene = sim_varianza(sigma, n, sims, alpha, rng)
-        valor_real = sigma**2
-        st.session_state.cache[key] = (muestras, medias, li, ls, contiene, valor_real, None, sigma, None)
-        st.session_state.sigma = sigma
-    elif tipo == "Proporción":
-        p = st.sidebar.slider("Proporción poblacional (p)", 0.01, 0.99, 0.5, 0.01)
-        muestras, medias, li, ls, contiene = sim_proporcion(p, n, sims, alpha, rng)
-        valor_real = p
-        st.session_state.cache[key] = (muestras, medias, li, ls, contiene, valor_real, None, None, p)
-        st.session_state.p = p
-else:
-    muestras, medias, li, ls, contiene, valor_real, mu, sigma, p = st.session_state.cache[key]
-    # Recalcular IC si cambia conf
-    if tipo == "Media con varianza conocida":
-        se = st.session_state.sigma / np.sqrt(n)
-        z = norm.ppf(1-alpha/2)
-        li = medias - z*se
-        ls = medias + z*se
-        contiene = (li <= st.session_state.mu) & (ls >= st.session_state.mu)
-    elif tipo == "Media con varianza desconocida":
-        s = muestras.std(axis=1, ddof=1)
-        se = s / np.sqrt(n)
-        tval = t.ppf(1-alpha/2, df=n-1)
-        li = medias - tval*se
-        ls = medias + tval*se
-        contiene = (li <= st.session_state.mu) & (ls >= st.session_state.mu)
-    elif tipo == "Varianza":
-        s2 = muestras.var(axis=1, ddof=1)
-        chi2_low = chi2.ppf(alpha/2, df=n-1)
-        chi2_high = chi2.ppf(1 - alpha/2, df=n-1)
-        li = (n-1)*s2/chi2_high
-        ls = (n-1)*s2/chi2_low
-        contiene = (li <= st.session_state.sigma**2) & (ls >= st.session_state.sigma**2)
-    elif tipo == "Proporción":
-        phat = muestras.mean(axis=1)
-        se = np.sqrt(phat*(1-phat)/n)
-        z = norm.ppf(1-alpha/2)
-        li = phat - z*se
-        ls = phat + z*se
-        contiene = (li <= st.session_state.p) & (ls >= st.session_state.p)
-
-# DataFrame para Altair
+# DataFrame
 df = pd.DataFrame({
     "Simulación": np.arange(1, sims+1),
     "Estadístico": medias,
@@ -175,16 +63,47 @@ df = pd.DataFrame({
     "Contiene": contiene
 })
 
-# Determinar valor poblacional para la línea
-valor_parametro = get_param(tipo)
+# Escala común para los gráficos
+xmin = min(df["LI"].min(), valor_real)
+xmax = max(df["LS"].max(), valor_real)
+
+def plot_intervalos(df, valor_parametro, titulo):
+    base = alt.Chart(df).encode(
+        y=alt.Y("Simulación:O", sort="descending")
+    )
+
+    intervalos = base.mark_rule(size=2).encode(
+        x=alt.X("LI", scale=alt.Scale(domain=[xmin, xmax])),
+        x2="LS",
+        color=alt.condition("datum.Contiene", alt.value("steelblue"), alt.value("red"))
+    )
+
+    puntos = base.mark_point(filled=True, size=30).encode(
+        x="Estadístico",
+        color=alt.condition("datum.Contiene", alt.value("steelblue"), alt.value("red"))
+    )
+
+    linea = alt.Chart(pd.DataFrame({"valor":[valor_parametro]})).mark_rule(
+        color="green", strokeDash=[4,4]
+    ).encode(
+        x=alt.X("valor", scale=alt.Scale(domain=[xmin, xmax]))
+    )
+
+    chart = (intervalos + puntos + linea).properties(
+        width=700, height=400, 
+        title=alt.TitleParams(titulo, orient="top")
+    ).configure_view(
+        continuousWidth=600, continuousHeight=400
+    )
+    return chart
 
 # Gráfico
-chart = plot_intervalos(df, valor_parametro, tipo)
+chart = plot_intervalos(df, valor_real, tipo)
 st.altair_chart(chart, use_container_width=True)
 
-# Tabla de primeros 20 conjuntos muestrales con numeración desde 1
+# Tabla
 primeras_20 = pd.DataFrame(muestras[:20])
-primeras_20.index = np.arange(1, primeras_20.shape[0]+1)  # filas numeradas desde 1
-primeras_20.columns = np.arange(1, primeras_20.shape[1]+1)  # columnas numeradas desde 1
+primeras_20.index = np.arange(1, primeras_20.shape[0]+1)
+primeras_20.columns = np.arange(1, primeras_20.shape[1]+1)
 st.subheader("Primeros 20 conjuntos muestrales")
 st.dataframe(primeras_20)
