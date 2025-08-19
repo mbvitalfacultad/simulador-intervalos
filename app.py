@@ -97,40 +97,42 @@ key = f"{tipo}-{n}-{sims}"
 rng = np.random.default_rng(1234)
 
 if key not in st.session_state.cache:
-    # Generar datos
+    # Generar datos y guardar parámetros
     if tipo == "Media con varianza conocida":
         mu = st.sidebar.slider("Media poblacional (μ)", -100.0, 100.0, 0.0, 0.1)
         sigma = st.sidebar.slider("Desvío estándar poblacional (σ)", 0.1, 50.0, 5.0, 0.1)
         muestras, medias, li, ls, contiene = sim_media_sigma_conocida(mu, sigma, n, sims, alpha, rng)
         valor_real = mu
+        st.session_state.cache[key] = (muestras, medias, li, ls, contiene, valor_real, mu, sigma, None)
     elif tipo == "Media con varianza desconocida":
         mu = st.sidebar.slider("Media poblacional (μ)", -100.0, 100.0, 0.0, 0.1)
         sigma = st.sidebar.slider("Desvío estándar poblacional (σ)", 0.1, 50.0, 5.0, 0.1)
         muestras, medias, li, ls, contiene = sim_media_sigma_desconocida(mu, sigma, n, sims, alpha, rng)
         valor_real = mu
+        st.session_state.cache[key] = (muestras, medias, li, ls, contiene, valor_real, mu, sigma, None)
     elif tipo == "Varianza":
         sigma = st.sidebar.slider("Desvío estándar poblacional (σ)", 0.1, 50.0, 5.0, 0.1)
         muestras, medias, li, ls, contiene = sim_varianza(sigma, n, sims, alpha, rng)
         valor_real = sigma**2
+        st.session_state.cache[key] = (muestras, medias, li, ls, contiene, valor_real, None, sigma, None)
     elif tipo == "Proporción":
         p = st.sidebar.slider("Proporción poblacional (p)", 0.01, 0.99, 0.5, 0.01)
         muestras, medias, li, ls, contiene = sim_proporcion(p, n, sims, alpha, rng)
         valor_real = p
-
-    st.session_state.cache[key] = (muestras, medias, li, ls, contiene, valor_real)
+        st.session_state.cache[key] = (muestras, medias, li, ls, contiene, valor_real, None, None, p)
 else:
-    muestras, medias, li, ls, contiene, valor_real = st.session_state.cache[key]
-    # Recalcular solo IC si cambia el nivel de confianza
+    muestras, medias, li, ls, contiene, valor_real, mu, sigma, p = st.session_state.cache[key]
+    # Recalcular IC si cambia conf
     if tipo == "Media con varianza conocida":
         se = sigma / np.sqrt(n)
-        z = norm.ppf(1 - alpha/2)
+        z = norm.ppf(1-alpha/2)
         li = medias - z*se
         ls = medias + z*se
         contiene = (li <= valor_real) & (ls >= valor_real)
     elif tipo == "Media con varianza desconocida":
         s = muestras.std(axis=1, ddof=1)
         se = s / np.sqrt(n)
-        tval = t.ppf(1 - alpha/2, df=n-1)
+        tval = t.ppf(1-alpha/2, df=n-1)
         li = medias - tval*se
         ls = medias + tval*se
         contiene = (li <= valor_real) & (ls >= valor_real)
@@ -144,7 +146,7 @@ else:
     elif tipo == "Proporción":
         phat = muestras.mean(axis=1)
         se = np.sqrt(phat*(1-phat)/n)
-        z = norm.ppf(1 - alpha/2)
+        z = norm.ppf(1-alpha/2)
         li = phat - z*se
         ls = phat + z*se
         contiene = (li <= valor_real) & (ls >= valor_real)
